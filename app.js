@@ -13,12 +13,25 @@ const state = {
   current: null, // aktuelles Apartment-Objekt
   expanded: {}, // sectionKey -> bool
   photos: {}, // itemKey -> [{id, url}]
+  documents: [], // [{id, fileName, mimeType, blob, typ, url}]
   pendingPhotoTarget: null,
   viewingPhotoUrl: null,
+  settingsOpen: false,
+  aiLoading: false,
+  aiMessage: null, // {type: "success"|"error", text}
 };
 
 const app = document.getElementById("app");
 const photoInput = document.getElementById("photoInput");
+const documentInput = document.getElementById("documentInput");
+
+function documentTypeLabel(typ) {
+  if (!typ) return "nicht analysiert";
+  if (typ === "expose") return "Exposé";
+  if (typ === "sonstiges") return "Sonstiges";
+  const { item } = findItemDef("unterlagen." + typ);
+  return item ? item.label : typ;
+}
 
 function escapeHtml(str) {
   return String(str ?? "").replace(/[&<>"']/g, (c) => ({
@@ -101,11 +114,30 @@ function renderList() {
   return `
     <header class="topbar">
       <h1>WohnungsCheck</h1>
+      <button class="icon-btn" data-action="toggle-settings" title="Einstellungen">⚙️</button>
       <button class="btn primary" data-action="new-apartment">+ Neu</button>
     </header>
     <main class="list">
+      ${state.settingsOpen ? renderSettingsPanel() : ""}
       ${state.apartments.length ? cards : `<p class="empty">Noch keine Wohnung angelegt.<br>Tippe auf „+ Neu“, um deine erste Besichtigung zu starten.</p>`}
     </main>`;
+}
+
+function renderSettingsPanel() {
+  const key = AI.getApiKey();
+  return `
+    <div class="settings-panel">
+      <h2>Einstellungen</h2>
+      <label class="field">
+        <span>Anthropic API-Key</span>
+        <input type="password" id="apiKeyInput" value="${escapeHtml(key)}" placeholder="sk-ant-...">
+      </label>
+      <p class="hint-text">Wird nur lokal auf diesem Gerät gespeichert, nie auf einen eigenen Server geladen. Nötig, damit hochgeladene Unterlagen (Exposé, Energieausweis, …) automatisch ausgelesen werden können. Key erstellen unter console.anthropic.com/settings/keys.</p>
+      <div class="doc-actions">
+        <button class="btn primary" data-action="save-api-key">Speichern</button>
+        <button class="btn" data-action="close-settings">Schließen</button>
+      </div>
+    </div>`;
 }
 
 // ---------- Apartment-Ansicht ----------
@@ -180,6 +212,8 @@ function renderApartment() {
         ${state.expanded._eckdaten ? `<div class="section-body eckdaten-grid">${eckdatenHtml}</div>` : ""}
       </section>
 
+      ${renderDocumentsSection()}
+
       <section class="section">
         <button class="section-header" data-action="toggle-section" data-section="_allgemein">
           <span>${state.expanded._allgemein ? "▾" : "▸"} Allgemeine Notizen & Fotos</span>
@@ -248,6 +282,41 @@ function renderWeaknesses(apartment) {
     </section>`;
 }
 
+function renderDocumentsSection() {
+  const hasKey = !!AI.getApiKey();
+  const rows = state.documents.map(d => `
+    <div class="doc-row">
+      <div class="doc-icon">${d.mimeType === "application/pdf" ? "📄" : "🖼️"}</div>
+      <div class="doc-info">
+        <div class="doc-name">${escapeHtml(d.fileName)}</div>
+        <div class="doc-type ${d.typ ? "doc-type-known" : ""}">${escapeHtml(documentTypeLabel(d.typ))}</div>
+      </div>
+      <button class="icon-btn" data-action="open-document" data-url="${d.url}" title="Öffnen">↗</button>
+      <button class="icon-btn danger" data-action="delete-document" data-id="${d.id}" title="Löschen">🗑</button>
+    </div>`).join("");
+
+  const messageHtml = state.aiMessage
+    ? `<div class="ai-message ai-${state.aiMessage.type}">${escapeHtml(state.aiMessage.text)}</div>`
+    : "";
+
+  return `
+    <section class="section">
+      <button class="section-header" data-action="toggle-section" data-section="_dokumente">
+        <span>${state.expanded._dokumente ? "▾" : "▸"} Dokumente${state.documents.length ? ` (${state.documents.length})` : ""}</span>
+      </button>
+      ${state.expanded._dokumente ? `
+      <div class="section-body">
+        ${!hasKey ? `<p class="hint-text">Kein API-Key hinterlegt – Dokumente können trotzdem gespeichert werden. Für automatisches Ausfüllen: zurück zur Übersicht → ⚙️ Einstellungen.</p>` : ""}
+        ${rows || `<p class="empty small">Noch keine Dokumente hochgeladen.</p>`}
+        <div class="doc-actions">
+          <button class="btn" data-action="upload-documents">+ Dokumente hochladen</button>
+          <button class="btn primary" data-action="analyze-documents" ${state.aiLoading || !state.documents.length ? "disabled" : ""}>${state.aiLoading ? "Analysiere …" : "Mit KI Felder ausfüllen"}</button>
+        </div>
+        ${messageHtml}
+      </div>` : ""}
+    </section>`;
+}
+
 function renderPhotoRow(itemKey, photos) {
   const thumbs = photos.map(p => `
     <div class="thumb" data-action="view-photo" data-url="${p.url}" data-id="${p.id}">
@@ -274,9 +343,22 @@ async function openApartment(id) {
   const a = await DB.getApartment(id);
   state.current = a;
   state.expanded = {};
+  state.aiMessage = null;
   await loadPhotosForCurrent();
+  await loadDocumentsForCurrent();
   state.route = "apartment";
   render();
+}
+
+async function loadDocumentsForCurrent() {
+  revokeDocumentUrls();
+  const docs = await DB.getDocumentsForApartment(state.current.id);
+  state.documents = docs.map(d => ({ ...d, url: URL.createObjectURL(d.blob) }));
+}
+
+function revokeDocumentUrls() {
+  for (const d of state.documents) URL.revokeObjectURL(d.url);
+  state.documents = [];
 }
 
 async function loadPhotosForCurrent() {
@@ -299,6 +381,7 @@ function revokePhotoUrls() {
 
 function backToList() {
   revokePhotoUrls();
+  revokeDocumentUrls();
   state.current = null;
   state.route = "list";
   init();
@@ -365,6 +448,69 @@ async function deletePhotoAction(id) {
   render();
 }
 
+documentInput.addEventListener("change", async () => {
+  const files = Array.from(documentInput.files || []);
+  documentInput.value = "";
+  if (!files.length || !state.current) return;
+  for (const file of files) {
+    const doc = await DB.addDocument(state.current.id, file);
+    state.documents.push({ ...doc, url: URL.createObjectURL(doc.blob) });
+  }
+  await DB.saveApartment(state.current);
+  render();
+});
+
+async function deleteDocumentAction(id) {
+  await DB.deleteDocument(id);
+  const doc = state.documents.find(d => d.id === id);
+  if (doc) URL.revokeObjectURL(doc.url);
+  state.documents = state.documents.filter(d => d.id !== id);
+  render();
+}
+
+async function analyzeDocuments() {
+  if (state.aiLoading || !state.documents.length) return;
+  state.aiLoading = true;
+  state.aiMessage = null;
+  render();
+  try {
+    const result = await AI.extractFromDocuments(state.documents);
+
+    let filled = 0;
+    if (result.eckdaten) {
+      for (const [key, value] of Object.entries(result.eckdaten)) {
+        if (value && !state.current.eckdaten[key]) {
+          state.current.eckdaten[key] = value;
+          filled++;
+        }
+      }
+    }
+
+    let recognized = 0;
+    if (Array.isArray(result.dateien)) {
+      for (const entry of result.dateien) {
+        const doc = state.documents[entry.index];
+        if (!doc || !entry.typ) continue;
+        doc.typ = entry.typ;
+        await DB.updateDocument({ id: doc.id, apartmentId: state.current.id, fileName: doc.fileName, mimeType: doc.mimeType, blob: doc.blob, typ: doc.typ, createdAt: doc.createdAt });
+        const itemKey = "unterlagen." + entry.typ;
+        if (state.current.checklist[itemKey]) {
+          state.current.checklist[itemKey].rating = "good";
+          recognized++;
+        }
+      }
+    }
+
+    await DB.saveApartment(state.current);
+    state.aiMessage = { type: "success", text: `${filled} Feld(er) ausgefüllt, ${recognized} Unterlage(n) erkannt.` };
+  } catch (err) {
+    state.aiMessage = { type: "error", text: err.message || String(err) };
+  } finally {
+    state.aiLoading = false;
+    render();
+  }
+}
+
 // ---------- Event-Delegation ----------
 
 app.addEventListener("click", async (e) => {
@@ -399,6 +545,18 @@ app.addEventListener("click", async (e) => {
     return;
   }
   if (action === "delete-photo") return deletePhotoAction(target.dataset.id);
+  if (action === "toggle-settings") { state.settingsOpen = !state.settingsOpen; return render(); }
+  if (action === "close-settings") { state.settingsOpen = false; return render(); }
+  if (action === "save-api-key") {
+    const input = document.getElementById("apiKeyInput");
+    AI.setApiKey(input.value.trim());
+    state.settingsOpen = false;
+    return render();
+  }
+  if (action === "upload-documents") return documentInput.click();
+  if (action === "open-document") { window.open(target.dataset.url, "_blank"); return; }
+  if (action === "delete-document") return deleteDocumentAction(target.dataset.id);
+  if (action === "analyze-documents") return analyzeDocuments();
 });
 
 function findItemKeyForPhoto(id) {

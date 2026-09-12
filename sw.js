@@ -1,10 +1,11 @@
-const CACHE = "wohnungscheck-v2";
+const CACHE = "wohnungscheck-v3";
 const ASSETS = [
   "./",
   "./index.html",
   "./styles.css",
   "./app.js",
   "./db.js",
+  "./ai.js",
   "./checklist-template.js",
   "./manifest.webmanifest",
   "./icons/icon-192.png",

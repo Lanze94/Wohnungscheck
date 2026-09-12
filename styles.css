@@ -66,6 +66,39 @@ input, textarea { font: inherit; color: inherit; }
 .btn.primary { background: var(--accent); color: white; }
 .btn.danger { background: #ffe5e3; color: var(--danger); }
 .btn.full { width: 100%; margin: 24px 0 40px; padding: 14px; text-align: center; }
+.btn:disabled { opacity: 0.5; }
+
+.settings-panel {
+  background: var(--card-bg);
+  border-radius: 14px;
+  padding: 16px;
+  margin-bottom: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.settings-panel h2 { margin: 0; font-size: 16px; }
+.hint-text { color: var(--sub); font-size: 12.5px; line-height: 1.5; margin: 0; }
+
+.doc-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+
+.doc-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+.doc-row:first-child { border-top: none; padding-top: 0; }
+.doc-icon { font-size: 22px; }
+.doc-info { flex: 1; min-width: 0; }
+.doc-name { font-size: 14px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.doc-type { font-size: 12px; color: var(--sub); }
+.doc-type.doc-type-known { color: var(--accent); font-weight: 600; }
+
+.ai-message { border-radius: 8px; padding: 10px 12px; font-size: 14px; }
+.ai-message.ai-success { background: #e8f9ee; color: #1a7d3c; }
+.ai-message.ai-error { background: #fff1f0; color: var(--danger); }
 
 .list { padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; }
 

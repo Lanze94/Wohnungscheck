@@ -22,9 +22,12 @@
 
 <!-- Hidden file input reused for photo capture -->
 <input type="file" id="photoInput" accept="image/*" capture="environment" style="display:none">
+<!-- Hidden file input reused for document upload (PDF/Fotos, mehrere gleichzeitig) -->
+<input type="file" id="documentInput" accept="application/pdf,image/*" multiple style="display:none">
 
 <script src="checklist-template.js"></script>
 <script src="db.js"></script>
+<script src="ai.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

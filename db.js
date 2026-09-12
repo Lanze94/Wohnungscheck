@@ -2,7 +2,7 @@
 // Stores: apartments (Metadaten + Checkliste als JSON), photos (Blobs, per apartmentId + itemKey)
 
 const DB_NAME = "wohnungscheck";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 function openDb() {
   return new Promise((resolve, reject) => {
@@ -14,6 +14,10 @@ function openDb() {
       }
       if (!db.objectStoreNames.contains("photos")) {
         const store = db.createObjectStore("photos", { keyPath: "id" });
+        store.createIndex("byApartment", "apartmentId", { unique: false });
+      }
+      if (!db.objectStoreNames.contains("documents")) {
+        const store = db.createObjectStore("documents", { keyPath: "id" });
         store.createIndex("byApartment", "apartmentId", { unique: false });
       }
     };
@@ -77,6 +81,8 @@ const DB = {
     const db = await dbPromise;
     const photos = await this.getPhotosForApartment(id);
     await Promise.all(photos.map(p => this.deletePhoto(p.id)));
+    const documents = await this.getDocumentsForApartment(id);
+    await Promise.all(documents.map(d => this.deleteDocument(d.id)));
     return new Promise((resolve, reject) => {
       const req = db.transaction("apartments", "readwrite").objectStore("apartments").delete(id);
       req.onsuccess = () => resolve();
@@ -139,5 +145,51 @@ const DB = {
   async getPhotosForItem(apartmentId, itemKey) {
     const all = await this.getPhotosForApartment(apartmentId);
     return all.filter(p => p.itemKey === itemKey);
+  },
+
+  async addDocument(apartmentId, file) {
+    const db = await dbPromise;
+    const doc = {
+      id: uid(),
+      apartmentId,
+      typ: null, // wird nach KI-Analyse gesetzt, z.B. "energieausweis" oder "expose"
+      fileName: file.name,
+      mimeType: file.type || "application/octet-stream",
+      blob: file,
+      createdAt: Date.now(),
+    };
+    return new Promise((resolve, reject) => {
+      const req = db.transaction("documents", "readwrite").objectStore("documents").put(doc);
+      req.onsuccess = () => resolve(doc);
+      req.onerror = () => reject(req.error);
+    });
+  },
+
+  async updateDocument(doc) {
+    const db = await dbPromise;
+    return new Promise((resolve, reject) => {
+      const req = db.transaction("documents", "readwrite").objectStore("documents").put(doc);
+      req.onsuccess = () => resolve(doc);
+      req.onerror = () => reject(req.error);
+    });
+  },
+
+  async deleteDocument(id) {
+    const db = await dbPromise;
+    return new Promise((resolve, reject) => {
+      const req = db.transaction("documents", "readwrite").objectStore("documents").delete(id);
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    });
+  },
+
+  async getDocumentsForApartment(apartmentId) {
+    const db = await dbPromise;
+    return new Promise((resolve, reject) => {
+      const idx = db.transaction("documents", "readonly").objectStore("documents").index("byApartment");
+      const req = idx.getAll(IDBKeyRange.only(apartmentId));
+      req.onsuccess = () => resolve(req.result.sort((a, b) => a.createdAt - b.createdAt));
+      req.onerror = () => reject(req.error);
+    });
   },
 };
