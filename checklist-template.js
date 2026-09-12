@@ -8,7 +8,7 @@ const ECKDATEN_FIELDS = [
   { key: "anbieter", label: "Anbieter" },
   { key: "adresse", label: "Adresse" },
   { key: "baujahr", label: "Gebäudejahr" },
-  { key: "hwb", label: "HWB-Wert" },
+  { key: "gebaeudeklasse", label: "Gebäudeklasse", type: "select", options: ["A", "B", "C", "D", "E", "F", "G", "H"] },
   { key: "groesse", label: "Größe (m²)" },
   { key: "stockwerk", label: "Stockwerk" },
   { key: "preis", label: "Preis / Miete" },
@@ -107,6 +107,14 @@ const CHECKLIST_SECTIONS = [
 // Reihenfolge aller Item-Keys (für Fortschrittsanzeige)
 function allChecklistItemKeys() {
   return CHECKLIST_SECTIONS.flatMap(s => s.items.map(i => s.key + "." + i.key));
+}
+
+// A-D = gut, E = Vorsicht, F-H = schlecht (für die Einfärbung der Gebäudeklasse-Auswahl)
+function gebaeudeklasseRating(value) {
+  if (!value) return "none";
+  if (["A", "B", "C", "D"].includes(value)) return "good";
+  if (value === "E") return "medium";
+  return "bad";
 }
 
 // Findet Sektion + Item-Definition zu einem "section.key"-Itemkey

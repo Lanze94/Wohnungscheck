@@ -114,11 +114,25 @@ function renderApartment() {
   const a = state.current;
   const { done, total } = itemProgress(a);
 
-  const eckdatenHtml = ECKDATEN_FIELDS.map(f => `
-    <label class="field">
-      <span>${escapeHtml(f.label)}</span>
-      <input type="text" data-field="eckdaten" data-key="${f.key}" value="${escapeHtml(a.eckdaten[f.key] || "")}" placeholder="–">
-    </label>`).join("");
+  const eckdatenHtml = ECKDATEN_FIELDS.map(f => {
+    const value = a.eckdaten[f.key] || "";
+    if (f.type === "select") {
+      const cls = RATING_META[gebaeudeklasseRating(value)]?.cls || "r-none";
+      const optionsHtml = [`<option value="">– nicht geprüft –</option>`]
+        .concat(f.options.map(o => `<option value="${o}" ${value === o ? "selected" : ""}>${o}</option>`))
+        .join("");
+      return `
+        <label class="field">
+          <span>${escapeHtml(f.label)}</span>
+          <select class="rating-select ${cls}" data-field="eckdatenSelect" data-key="${f.key}">${optionsHtml}</select>
+        </label>`;
+    }
+    return `
+      <label class="field">
+        <span>${escapeHtml(f.label)}</span>
+        <input type="text" data-field="eckdaten" data-key="${f.key}" value="${escapeHtml(value)}" placeholder="–">
+      </label>`;
+  }).join("");
 
   const generalPhotos = state.photos["_general"] || [];
 
@@ -295,6 +309,7 @@ async function createApartment() {
   await DB.saveApartment(a);
   await openApartment(a.id);
   state.expanded._eckdaten = true;
+  render();
 }
 
 async function deleteApartment(id) {
@@ -397,6 +412,10 @@ app.addEventListener("change", (e) => {
   const el = e.target;
   if (el.dataset.field === "itemRating") {
     state.current.checklist[el.dataset.item].rating = el.value;
+    DB.saveApartment(state.current);
+    render();
+  } else if (el.dataset.field === "eckdatenSelect") {
+    state.current.eckdaten[el.dataset.key] = el.value;
     DB.saveApartment(state.current);
     render();
   }
