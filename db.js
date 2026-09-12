@@ -28,13 +28,28 @@ function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
 
+// Alte Datensätze (Status-Kreis statt Dropdown) auf das neue {rating, note}-Format heben.
+const OLD_STATUS_TO_RATING = { open: "none", ok: "good", issue: "bad" };
+function migrateApartment(a) {
+  if (!a) return a;
+  for (const key of allChecklistItemKeys()) {
+    const entry = a.checklist[key];
+    if (!entry) { a.checklist[key] = { rating: "none", note: "" }; continue; }
+    if (entry.rating === undefined) {
+      entry.rating = OLD_STATUS_TO_RATING[entry.status] || "none";
+      delete entry.status;
+    }
+  }
+  return a;
+}
+
 const DB = {
   async listApartments() {
     const db = await dbPromise;
     return new Promise((resolve, reject) => {
       const tx = db.transaction("apartments", "readonly");
       const req = tx.objectStore("apartments").getAll();
-      req.onsuccess = () => resolve(req.result.sort((a, b) => b.updatedAt - a.updatedAt));
+      req.onsuccess = () => resolve(req.result.sort((a, b) => b.updatedAt - a.updatedAt).map(migrateApartment));
       req.onerror = () => reject(req.error);
     });
   },
@@ -43,7 +58,7 @@ const DB = {
     const db = await dbPromise;
     return new Promise((resolve, reject) => {
       const req = db.transaction("apartments", "readonly").objectStore("apartments").get(id);
-      req.onsuccess = () => resolve(req.result);
+      req.onsuccess = () => resolve(migrateApartment(req.result));
       req.onerror = () => reject(req.error);
     });
   },
@@ -73,7 +88,7 @@ const DB = {
     const checklist = {};
     for (const section of CHECKLIST_SECTIONS) {
       for (const item of section.items) {
-        checklist[section.key + "." + item.key] = { status: "open", note: "" };
+        checklist[section.key + "." + item.key] = { rating: "none", note: "" };
       }
     }
     const eckdaten = {};

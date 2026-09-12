@@ -1,10 +1,10 @@
 // WohnungsCheck – vanilla JS SPA, keine Frameworks, alles offline via IndexedDB.
 
-const STATUS_CYCLE = ["open", "ok", "issue"];
-const STATUS_META = {
-  open: { icon: "○", label: "offen", cls: "st-open" },
-  ok: { icon: "✓", label: "ok", cls: "st-ok" },
-  issue: { icon: "!", label: "Achtung", cls: "st-issue" },
+const RATING_META = {
+  none: { label: "– nicht geprüft –", cls: "r-none" },
+  good: { label: "Gut", cls: "r-good" },
+  medium: { label: "Mittel", cls: "r-medium" },
+  bad: { label: "Schlecht", cls: "r-bad" },
 };
 
 const state = {
@@ -28,8 +28,32 @@ function escapeHtml(str) {
 
 function itemProgress(apartment) {
   const keys = allChecklistItemKeys();
-  const done = keys.filter(k => apartment.checklist[k] && apartment.checklist[k].status !== "open").length;
+  let done = 0;
+  for (const key of keys) {
+    const { item } = findItemDef(key);
+    const data = apartment.checklist[key];
+    if (!data) continue;
+    if (item.type === "text") { if (data.note && data.note.trim() !== "") done++; }
+    else if (data.rating && data.rating !== "none") done++;
+  }
   return { done, total: keys.length };
+}
+
+// Alle Rating-Punkte mit Auffälligkeit (medium/bad), schlechteste zuerst.
+function collectWeaknesses(apartment) {
+  const results = [];
+  for (const section of CHECKLIST_SECTIONS) {
+    for (const item of section.items) {
+      if (item.type !== "rating") continue;
+      const key = section.key + "." + item.key;
+      const data = apartment.checklist[key];
+      if (data && (data.rating === "bad" || data.rating === "medium")) {
+        results.push({ key, sectionTitle: section.title, label: item.label, rating: data.rating, note: data.note });
+      }
+    }
+  }
+  results.sort((a, b) => (a.rating === b.rating ? 0 : a.rating === "bad" ? -1 : 1));
+  return results;
 }
 
 async function init() {
@@ -54,13 +78,21 @@ function renderList() {
   const cards = state.apartments.map(a => {
     const { done, total } = itemProgress(a);
     const pct = total ? Math.round((done / total) * 100) : 0;
+    const weaknesses = collectWeaknesses(a);
+    const badCount = weaknesses.filter(w => w.rating === "bad").length;
+    const badge = weaknesses.length
+      ? `<span class="weak-badge">⚠ ${weaknesses.length}${badCount ? ` (${badCount} schwer)` : ""}</span>`
+      : "";
     return `
       <div class="card" data-action="open-apartment" data-id="${a.id}">
         <div class="card-main">
           <div class="card-title">${escapeHtml(a.name) || "Ohne Namen"} ${a.favorite ? "★" : ""}</div>
           <div class="card-sub">${escapeHtml(a.date || "")}</div>
           <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
-          <div class="card-sub">${done}/${total} geprüft</div>
+          <div class="card-sub-row">
+            <span class="card-sub">${done}/${total} geprüft</span>
+            ${badge}
+          </div>
         </div>
         <button class="icon-btn danger" data-action="delete-apartment" data-id="${a.id}" title="Löschen">🗑</button>
       </div>`;
@@ -92,7 +124,10 @@ function renderApartment() {
 
   const sectionsHtml = CHECKLIST_SECTIONS.map(section => {
     const items = section.items;
-    const sectionDone = items.filter(i => a.checklist[section.key + "." + i.key].status !== "open").length;
+    const sectionDone = items.filter(i => {
+      const data = a.checklist[section.key + "." + i.key];
+      return i.type === "text" ? (data.note && data.note.trim() !== "") : data.rating !== "none";
+    }).length;
     const isOpen = !!state.expanded[section.key];
     const itemsHtml = items.map(item => renderItem(section.key, item)).join("");
     return `
@@ -144,27 +179,59 @@ function renderApartment() {
 
       ${sectionsHtml}
 
+      ${renderWeaknesses(a)}
+
       <button class="btn danger full" data-action="delete-apartment" data-id="${a.id}">Wohnung löschen</button>
     </main>`;
 }
 
 function renderItem(sectionKey, item) {
   const itemKey = sectionKey + "." + item.key;
-  const data = state.current.checklist[itemKey] || { status: "open", note: "" };
-  const meta = STATUS_META[data.status];
+  const data = state.current.checklist[itemKey] || { rating: "none", note: "" };
   const photos = state.photos[itemKey] || [];
+
+  const ratingHtml = item.type === "rating" ? (() => {
+    const options = RATING_KINDS[item.kind];
+    const optionsHtml = Object.entries(options).map(([value, label]) =>
+      `<option value="${value}" ${data.rating === value ? "selected" : ""}>${escapeHtml(label)}</option>`
+    ).join("");
+    const cls = RATING_META[data.rating]?.cls || "r-none";
+    return `<select class="rating-select ${cls}" data-field="itemRating" data-item="${itemKey}">${optionsHtml}</select>`;
+  })() : "";
+
   return `
     <div class="item">
-      <div class="item-head">
-        <button class="status-btn ${meta.cls}" data-action="cycle-status" data-item="${itemKey}" title="${meta.label}">${meta.icon}</button>
-        <div class="item-label">
-          <div>${escapeHtml(item.label)}</div>
-          ${item.hint ? `<div class="item-hint">${escapeHtml(item.hint)}</div>` : ""}
-        </div>
+      <div class="item-label">
+        <div>${escapeHtml(item.label)}</div>
+        ${item.hint ? `<div class="item-hint">${escapeHtml(item.hint)}</div>` : ""}
       </div>
-      <textarea class="item-note" data-field="itemNote" data-item="${itemKey}" placeholder="Notiz …">${escapeHtml(data.note)}</textarea>
+      ${ratingHtml}
+      <textarea class="item-note" data-field="itemNote" data-item="${itemKey}" placeholder="${item.type === "rating" ? "Zusatzinfo (optional) …" : "Notiz …"}">${escapeHtml(data.note)}</textarea>
       ${renderPhotoRow(itemKey, photos)}
     </div>`;
+}
+
+function renderWeaknesses(apartment) {
+  const weaknesses = collectWeaknesses(apartment);
+  const body = weaknesses.length
+    ? weaknesses.map(w => `
+        <div class="weak-item ${w.rating === "bad" ? "weak-bad" : "weak-medium"}">
+          <div class="weak-head">
+            <div class="weak-label">${escapeHtml(w.label)}</div>
+            <div class="weak-section">${escapeHtml(w.sectionTitle)}</div>
+          </div>
+          ${w.note ? `<div class="weak-note">${escapeHtml(w.note)}</div>` : ""}
+        </div>`).join("")
+    : `<p class="empty small">Bisher keine Auffälligkeiten erfasst.</p>`;
+
+  return `
+    <section class="section weaknesses">
+      <div class="section-header static">
+        <span>⚠️ Schwachstellen-Übersicht</span>
+        <span class="section-count">${weaknesses.length}</span>
+      </div>
+      <div class="section-body">${body}</div>
+    </section>`;
 }
 
 function renderPhotoRow(itemKey, photos) {
@@ -283,14 +350,6 @@ async function deletePhotoAction(id) {
   render();
 }
 
-function cycleStatus(itemKey) {
-  const data = state.current.checklist[itemKey];
-  const idx = STATUS_CYCLE.indexOf(data.status);
-  data.status = STATUS_CYCLE[(idx + 1) % STATUS_CYCLE.length];
-  DB.saveApartment(state.current);
-  render();
-}
-
 // ---------- Event-Delegation ----------
 
 app.addEventListener("click", async (e) => {
@@ -312,7 +371,6 @@ app.addEventListener("click", async (e) => {
     state.expanded[key] = !state.expanded[key];
     return render();
   }
-  if (action === "cycle-status") return cycleStatus(target.dataset.item);
   if (action === "add-photo") {
     state.pendingPhotoTarget = { itemKey: target.dataset.item };
     return photoInput.click();
@@ -335,6 +393,15 @@ function findItemKeyForPhoto(id) {
   return null;
 }
 
+app.addEventListener("change", (e) => {
+  const el = e.target;
+  if (el.dataset.field === "itemRating") {
+    state.current.checklist[el.dataset.item].rating = el.value;
+    DB.saveApartment(state.current);
+    render();
+  }
+});
+
 app.addEventListener("input", (e) => {
   const el = e.target;
   const field = el.dataset.field;
@@ -346,6 +413,13 @@ app.addEventListener("input", (e) => {
   else if (field === "itemNote") state.current.checklist[el.dataset.item].note = el.value;
   else return;
   DB.saveApartment(state.current);
+});
+
+// Notizfelder lösen keinen Re-Render pro Tastendruck aus (Cursor würde springen).
+// Beim Verlassen des Feldes einmal neu rendern, damit die Schwachstellen-Übersicht aktuell bleibt.
+app.addEventListener("focusout", (e) => {
+  const field = e.target.dataset.field;
+  if (field === "itemNote" && state.route === "apartment") render();
 });
 
 init();

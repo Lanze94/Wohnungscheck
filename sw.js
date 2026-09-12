@@ -1,4 +1,4 @@
-const CACHE = "wohnungscheck-v1";
+const CACHE = "wohnungscheck-v2";
 const ASSETS = [
   "./",
   "./index.html",
